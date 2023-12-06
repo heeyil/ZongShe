@@ -1,1 +1,3 @@
-# fl 哈哈我草泥马
+# fl
+Progressive Integrated Challenge Program\
+created by Fulin Liu and Heyi Li
