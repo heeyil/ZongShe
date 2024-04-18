@@ -3,6 +3,13 @@ from nn.parameter import Parameter
 from cuda import Device, current_device
 from autograd import set_grad_enabled
 from tensor import Tensor
+from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
+from typing_extensions import Self
+
+
+def _forward_unimplemented(self, *input: Any) -> None:
+    raise NotImplementedError(f"Module is missing the required \"forward\" function")
+
 
 class Module:
     r"""下面引用Pytorch的Module类的注释
@@ -110,6 +117,34 @@ class Module:
                 self._non_persistent_buffers_set.discard(name)
             else:
                 self._non_persistent_buffers_set.add(name)
+
+    """
+    Attention Please!!!
+    在这里声明了'forward'方法
+    Callable[..., Any] 表明它是一个可调用对象，接受任意数量和类型的参数，并返回任意类型的值
+    Callable[..., Any] 的作用等价于
+
+    def __call__(self, *input):
+        return self.forward(*input)
+
+    而forward方法默认值为 方法_forward_unimplemented
+    因为forward本就是需要继承Module类的子类去实现的
+    如果子类没有实现forward就调用
+    那么就会调用默认的_forward_unimplemented方法
+    从而引发报错
+
+    总的来说，下面这段代码等价于
+
+    class Module:
+        def __call__(self, *input):
+            return self.forward(*input)
+
+        def forward(self, *input):
+            raise NotImplementedError
+
+    下面这种写法明显感觉更高级，其他优点不知道
+    """
+    forward: Callable[..., Any] = _forward_unimplemented
 
     def register_parameter(self, name: str, param: Optional[Parameter]) -> None:
         r"""Add a parameter to the module.
@@ -297,148 +332,6 @@ class Module:
         fn(self)
         return self
 
-    """
-    下面实现将模型转移到GPU上的方法
-    关于@overload参考
-    https://zhuanlan.zhihu.com/p/489767633
-    """
-    @overload
-    def to(self, device: Optional[DeviceLikeType] = ..., dtype: Optional[dtype] = ...,
-           non_blocking: bool = ...) -> Self:
-        ...
-
-    @overload
-    def to(self, dtype: dtype, non_blocking: bool = ...) -> Self:
-        ...
-
-    @overload
-    def to(self, tensor: Tensor, non_blocking: bool = ...) -> Self:
-        ...
-
-    def to(self, *args, **kwargs):
-        r"""Move and/or cast the parameters and buffers.
-
-        This can be called as
-
-        .. function:: to(device=None, dtype=None, non_blocking=False)
-           :noindex:
-
-        .. function:: to(dtype, non_blocking=False)
-           :noindex:
-
-        .. function:: to(tensor, non_blocking=False)
-           :noindex:
-
-        .. function:: to(memory_format=torch.channels_last)
-           :noindex:
-
-        Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
-        floating point or complex :attr:`dtype`\ s. In addition, this method will
-        only cast the floating point or complex parameters and buffers to :attr:`dtype`
-        (if given). The integral parameters and buffers will be moved
-        :attr:`device`, if that is given, but with dtypes unchanged. When
-        :attr:`non_blocking` is set, it tries to convert/move asynchronously
-        with respect to the host if possible, e.g., moving CPU Tensors with
-        pinned memory to CUDA devices.
-
-        See below for examples.
-
-        .. note::
-            This method modifies the module in-place.
-
-        Args:
-            device (:class:`torch.device`): the desired device of the parameters
-                and buffers in this module
-            dtype (:class:`torch.dtype`): the desired floating point or complex dtype of
-                the parameters and buffers in this module
-            tensor (torch.Tensor): Tensor whose dtype and device are the desired
-                dtype and device for all parameters and buffers in this module
-            memory_format (:class:`torch.memory_format`): the desired memory
-                format for 4D parameters and buffers in this module (keyword
-                only argument)
-
-        Returns:
-            Module: self
-
-        Examples::
-
-            >>> # xdoctest: +IGNORE_WANT("non-deterministic")
-            >>> linear = nn.Linear(2, 2)
-            >>> linear.weight
-            Parameter containing:
-            tensor([[ 0.1913, -0.3420],
-                    [-0.5113, -0.2325]])
-            >>> linear.to(torch.double)
-            Linear(in_features=2, out_features=2, bias=True)
-            >>> linear.weight
-            Parameter containing:
-            tensor([[ 0.1913, -0.3420],
-                    [-0.5113, -0.2325]], dtype=torch.float64)
-            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA1)
-            >>> gpu1 = torch.device("cuda:1")
-            >>> linear.to(gpu1, dtype=torch.half, non_blocking=True)
-            Linear(in_features=2, out_features=2, bias=True)
-            >>> linear.weight
-            Parameter containing:
-            tensor([[ 0.1914, -0.3420],
-                    [-0.5112, -0.2324]], dtype=torch.float16, device='cuda:1')
-            >>> cpu = torch.device("cpu")
-            >>> linear.to(cpu)
-            Linear(in_features=2, out_features=2, bias=True)
-            >>> linear.weight
-            Parameter containing:
-            tensor([[ 0.1914, -0.3420],
-                    [-0.5112, -0.2324]], dtype=torch.float16)
-
-            >>> linear = nn.Linear(2, 2, bias=None).to(torch.cdouble)
-            >>> linear.weight
-            Parameter containing:
-            tensor([[ 0.3741+0.j,  0.2382+0.j],
-                    [ 0.5593+0.j, -0.4443+0.j]], dtype=torch.complex128)
-            >>> linear(torch.ones(3, 2, dtype=torch.cdouble))
-            tensor([[0.6122+0.j, 0.1150+0.j],
-                    [0.6122+0.j, 0.1150+0.j],
-                    [0.6122+0.j, 0.1150+0.j]], dtype=torch.complex128)
-
-        """
-        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
-
-        if dtype is not None:
-            if not (dtype.is_floating_point or dtype.is_complex):
-                raise TypeError('nn.Module.to only accepts floating point or complex '
-                                f'dtypes, but got desired dtype={dtype}')
-            if dtype.is_complex:
-                warnings.warn(
-                    "Complex modules are a new feature under active development whose design may change, "
-                    "and some modules might not work as expected when using complex tensors as parameters or buffers. "
-                    "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml "
-                    "if a complex module does not work as expected.")
-
-        def convert(t):
-            try:
-                if convert_to_format is not None and t.dim() in (4, 5):
-                    return t.to(
-                        device,
-                        dtype if t.is_floating_point() or t.is_complex() else None,
-                        non_blocking,
-                        memory_format=convert_to_format,
-                    )
-                return t.to(
-                    device,
-                    dtype if t.is_floating_point() or t.is_complex() else None,
-                    non_blocking,
-                )
-            except NotImplementedError as e:
-                if str(e) == "Cannot copy out of meta tensor; no data!":
-                    raise NotImplementedError(
-                        f"{e} Please use torch.nn.Module.to_empty() instead of torch.nn.Module.to() "
-                        f"when moving module from meta to a different device."
-                    ) from None
-                else:
-                    raise
-
-        return self._apply(convert)
-
     # __getattr__用于访问类中是否有'name'代表的属性值
     # 有则返回，无则报错
     def __getattr__(self, name: str) -> Any:
@@ -562,10 +455,34 @@ class Module:
         else:
             super().__delattr__(name)
 
+    def _named_members(self, get_members_fn, prefix='', recurse=True, remove_duplicate: bool = True):
+        r"""Help yield various names + members of modules."""
+        memo = set()
+        modules = self.named_modules(prefix=prefix, remove_duplicate=remove_duplicate) if recurse else [(prefix, self)]
+        for module_prefix, module in modules:
+            members = get_members_fn(module)
+            for k, v in members:
+                if v is None or v in memo:
+                    continue
+                if remove_duplicate:
+                    memo.add(v)
+                name = module_prefix + ('.' if module_prefix else '') + k
+                yield name, v
+
     def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
         r"""Return an iterator over module parmeters.
         
         经常在使用优化器更新模型参数时使用
+
+        Yields:
+            Parameter: module parameter
+
+        Example::
+
+            >>> for param in model.parameters():
+            >>>     print(type(param), param.size())
+            <class 'torch.Tensor'> (20L,)
+            <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
         """
         for name, param in self.named_parameters(recurse=recurse):
             yield param
@@ -580,9 +497,8 @@ class Module:
 
         Args:
             prefix (str): prefix to prepend to all parameter names.
-            recurse (bool): if True, then yields parameters of this module
-                and all submodules. Otherwise, yields only parameters that
-                are direct members of this module.
+            recurse (bool): True:还会返回子模块的Parameter
+                            Fasle:只返回该模块的Parameter
             remove_duplicate (bool, optional): whether to remove the duplicated
                 parameters in the result. Defaults to True.
 
@@ -600,37 +516,240 @@ class Module:
             lambda module: module._parameters.items(),
             prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
         yield from gen
-    
-    def __call__(self, *x):
-        return self.forward(*x)
 
-    def __setattr__(self, __name, __value):
-        self.__dict__[__name] = __value
-        if isinstance(__value, Parameter):
-            self._parameters[__name] = __value
-        if isinstance(__value, Module):
-            self._modules[__name] = __value
-            for key in __value._parameters:
-                self._parameters[__name + "." + key] = __value._parameters[key]
+    def buffers(self, recurse: bool = True) -> Iterator[Tensor]:
+        r"""Return an iterator over module buffers.
 
-    def parameters(self):
-        for param in self._parameters.values():
-            yield param
+        Args:
+            recurse (bool): True:还会返回子模块的buffer
+                            Fasle:只返回该模块的buffer
 
-    def add_module(self, name, module):
-        self._modules[name] = module
+        Yields:
+            Tensor: module buffer
 
-    def modules(self):
-        for module in self._modules.values():
+        Example::
+
+            >>> for buf in model.buffers():
+            >>>     print(type(buf), buf.size())
+            <class 'torch.Tensor'> (20L,)
+            <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
+
+        """
+        for _, buf in self.named_buffers(recurse=recurse):
+            yield buf
+
+    def named_buffers(self, prefix: str = '', recurse: bool = True, remove_duplicate: bool = True) -> Iterator[Tuple[str, Tensor]]:
+        r"""Return an iterator over module buffers, yielding both the name of the buffer as well as the buffer itself.
+
+        Args:
+            prefix (str): prefix to prepend to all buffer names.
+            recurse (bool): True:还会返回子模块的buffer
+                            Fasle:只返回该模块的buffer
+            remove_duplicate (bool, optional): whether to remove the duplicated buffers in the result. Defaults to True.
+
+        Yields:
+            (str, Tensor): Tuple containing the name and buffer
+
+        Example::
+
+            >>> for name, buf in self.named_buffers():
+            >>>     if name in ['running_var']:
+            >>>         print(buf.size())
+
+        """
+        gen = self._named_members(
+            lambda module: module._buffers.items(),
+            prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
+        yield from gen
+
+    def children(self) -> Iterator['Module']:
+        r"""Return an iterator over immediate children modules.
+        返回该模块的子模块
+
+        Yields:
+            Module: a child module
+        """
+        for name, module in self.named_children():
             yield module
 
-    def train(self, mode=True):
+    def named_children(self) -> Iterator[Tuple[str, 'Module']]:
+        r"""Return an iterator over immediate children modules, yielding both the name of the module as well as the module itself.
+
+        Yields:
+            (str, Module): Tuple containing a name and child module
+
+        Example::
+
+            >>> for name, module in model.named_children():
+            >>>     if name in ['conv4', 'conv5']:
+            >>>         print(module)
+
+        """
+        memo = set()
+        for name, module in self._modules.items():
+            if module is not None and module not in memo:
+                memo.add(module)
+                yield name, module
+
+    def modules(self) -> Iterator['Module']:
+        r"""Return an iterator over all modules in the network.
+        返回该模型的所有模块，不返回模块名
+
+        Yields:
+            Module: a module in the network
+
+        Note:
+        重复的module只返回一次，例如下面的例子中，'l'只返回一次
+        即没有输出:
+        2 -> Linear(in_features=2, out_features=2, bias=True)
+
+        Example::
+
+            >>> l = nn.Linear(2, 2)
+            >>> net = nn.Sequential(l, l)
+            >>> for idx, m in enumerate(net.modules()):
+            ...     print(idx, '->', m)
+
+            0 -> Sequential(
+              (0): Linear(in_features=2, out_features=2, bias=True)
+              (1): Linear(in_features=2, out_features=2, bias=True)
+            )
+            1 -> Linear(in_features=2, out_features=2, bias=True)
+
+        """
+        for _, module in self.named_modules():
+            yield module
+
+
+    def named_modules(self, memo: Optional[Set['Module']] = None, prefix: str = '', remove_duplicate: bool = True):
+        r"""返回该模型的所有模块，包括名字和模型本身(both the name of the module as well as the module itelf)
+
+        Args:
+            memo: 记录已经抛出(即已经yield)的模块
+            prefix: 加在模块名字前的前缀
+            remove_duplicate: 是否返回重复的模块
+
+        Yields:
+            (str, Module): Tuple of name and module
+
+        Note:
+        重复的module只返回一次，例如下面的例子中，'l'只返回一次
+        即没有输出:
+        2 -> ('1', Linear(in_features=2, out_features=2, bias=True))
+
+        Example::
+
+            >>> l = nn.Linear(2, 2)
+            >>> net = nn.Sequential(l, l)
+            >>> for idx, m in enumerate(net.named_modules()):
+            ...     print(idx, '->', m)
+
+            0 -> ('', Sequential(
+              (0): Linear(in_features=2, out_features=2, bias=True)
+              (1): Linear(in_features=2, out_features=2, bias=True)
+            ))
+            1 -> ('0', Linear(in_features=2, out_features=2, bias=True))
+
+        """
+        if memo is None:
+            memo = set()
+        if self not in memo:
+            if remove_duplicate:
+                memo.add(self)
+            # 返回 self._modules 下的 name 和 module 元组
+            yield prefix, self
+            for name, module in self._modules.items():
+                if module is None:
+                    continue
+                submodule_prefix = prefix + ('.' if prefix else '') + name
+                # 递归调用和返回 module.named_modules
+                yield from module.named_modules(memo, submodule_prefix, remove_duplicate)
+
+        def train(self: T, mode: bool = True) -> T:
+        r"""Set the module in training mode.
+        将模型设置为训练模式
+
+        Returns:
+            Module: self
+        """
+        if not isinstance(mode, bool):
+            raise ValueError("training mode is expected to be boolean")
         self.training = mode
-        for module in self.modules():
+        # 要将子模型的模式也设置为训练
+        # 这个时候就体现出上面一堆实现属性访问方法的作用
+        # 就像xxx，平时多大一坨，柱在那啥事不干，但是一到打游戏作用就显示出来了->帮助大家不打瞌睡
+        for module in self.children():
             module.train(mode)
+        return self
 
-    def forward(self, x):
-        raise NotImplementedError
-
-    def eval(self):
+    def eval(self: T) -> T:
+        """
+        设置为评估模式
+        如此简洁的代码，就像xxx打游戏时的脑子一样简单，二极管似的，打游戏->叫，不打游戏->不叫
+        """
         return self.train(False)
+
+    def requires_grad_(self: T, requires_grad: bool = True) -> T:
+        r"""Change if autograd should record operations on parameters in this module.
+
+        This method sets the parameters' :attr:`requires_grad` attributes
+        in-place.
+
+        This method is helpful for freezing part of the module for finetuning
+        or training parts of a model individually (e.g., GAN training).
+
+        See :ref:`locally-disable-grad-doc` for a comparison between
+        `.requires_grad_()` and several similar mechanisms that may be confused with it.
+
+        Args:
+            requires_grad (bool): whether autograd should record operations on
+                                  parameters in this module. Default: ``True``.
+        """
+        for p in self.parameters():
+            p.requires_grad_(requires_grad)
+        return self
+
+    def zero_grad(self, set_to_none: bool = True) -> None:
+        r"""Reset gradients of all model parameters.
+        重置所有参数Parameter的梯度
+
+        Args:
+            set_to_none (bool): True -> 将所有 Parameter 的梯度设为 None
+                                False -> 将所有 Parameter 的梯度设为 0
+        """
+        for p in self.parameters():
+            if p.grad is not None:
+                if set_to_none:
+                    p.grad = None
+                else:
+                    # 判断p是否是计算图中的叶子节点
+                    if p.grad.grad_fn is not None:
+                        p.grad.detach_()
+                    else:
+                        p.grad.requires_grad_(False)
+                    p.grad.zero_()
+
+    """
+    下面是一堆实现转移的函数
+    """
+    
+    def to(self, device):
+        device = Device(device)
+        if self.device == device:
+            return self
+        else:
+            module = deepcopy(self)
+            module.move(device)
+            return module
+
+    def move(self, device):
+        device = Device(device)
+        for module in self.__dict__.values():
+            if isinstance(module, Module)
+
+    def cuda(self):
+        device = current_device()
+        return self.to(device)
+
+    def cpu(self):
+        return self.to('cpu')
