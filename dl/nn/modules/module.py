@@ -101,7 +101,7 @@ class Module:
         elif hasattr(self, name) and name not in self._buffers:
             raise KeyError(f"attribute '{name}' already exists")
         elif tensor is not None and not isinstance(tensor, Tensor):
-            raise TypeError(f"cannot assign this tensor to buffer '{name}'"
+            raise TypeError(f"cannot assign this to buffer '{name}'"
                            "(torch Tensor or None requored)"
                            )
         else:
@@ -463,6 +463,8 @@ class Module:
     没有这些的话牛折翼就不是一个完整的牛折翼，其就不能正常运作
     对Module类也是如此
     通过上面这个例子你应该能明白下面这个'setattr'类有多重要了
+
+    '__setattr__'的作用就是正确地将parameter,buffer,module添加到Module中
     """
     
     """
@@ -480,6 +482,13 @@ class Module:
         """
         下面这个方法'remove_from'
         实现 删除 '*dice_or_sets'中一堆列表或元组中key为'name'的元素
+        这在为parameter,buffer,module赋值时使用
+        举个例子：
+        假设要将'name'为'weight'的类型为'parameter'的参数添加进模型
+        那么'weight'这个名字的参数就只能为parameter，不能是buffer,module
+        所以要删除buffer,module中的'name'为'weight'的参数
+
+        这说明 self.dict，self._buffers，self._parameters，self._modules 中的属性应该是互斥的
         """
         def remove_from(*dicts_or_sets):
             for d in dicts_or_sets:
@@ -490,6 +499,8 @@ class Module:
                         d.discard(name)
 
         # __dict__本质上就是一个普通的字典
+
+        # 对parameter
         params = self.__dict__.get('_parameters')
         if isinstance(value, Parameter):
             # 下面这段代码检查了继承 nn.Module 的自定义模块是否有正确地初始化父类 nn.Module
@@ -497,52 +508,49 @@ class Module:
             if params is None:
                 raise AttributeError(
                     "cannot assign parameters before Module.__init__() call")
-            
             remove_from(self.__dict__, self._buffers, self._modules, self._non_persistent_buffers_set)
             self.register_parameter(name, value)
+        # value并不是Parameter实例，但该name代表的参数已在模型中存在，说明这个value的赋值是修改之前该参数的赋值
         elif params is not None and name in params:
             if value is not None:
-                raise TypeError(f"cannot assign '{torch.typename(value)}' as parameter '{name}' "
-                                "(torch.nn.Parameter or None expected)"
+                raise TypeError(f"cannot assign this value as parameter '{name}' "
+                                "(Parameter or None expected)"
                                 )
             self.register_parameter(name, value)
         else:
+            # 对module
             modules = self.__dict__.get('_modules')
             if isinstance(value, Module):
                 if modules is None:
                     raise AttributeError(
                         "cannot assign module before Module.__init__() call")
                 remove_from(self.__dict__, self._parameters, self._buffers, self._non_persistent_buffers_set)
-                for hook in _global_module_registration_hooks.values():
-                    output = hook(self, name, value)
-                    if output is not None:
-                        value = output
                 modules[name] = value
             elif modules is not None and name in modules:
                 if value is not None:
-                    raise TypeError(f"cannot assign '{torch.typename(value)}' as child module '{name}' "
-                                    "(torch.nn.Module or None expected)"
+                    raise TypeError(f"cannot assign this as child module '{name}' "
+                                    "(nn.Module or None expected)"
                                     )
-                for hook in _global_module_registration_hooks.values():
-                    output = hook(self, name, value)
-                    if output is not None:
-                        value = output
                 modules[name] = value
             else:
+                # 对buffer
+                # 注意到buffer与parameter与module不同
+                # buffer没有'if isinstance(value, Tensor):...'
+                # 这说明想要给Module增加buffer,self.register_buffer是唯一的方式
+                # __setattr__ 只能将 self._buffers 中已有的buffer重新赋值为None或者tensor
+                # 目前没搞懂为什么要这样 :(
+                
                 buffers = self.__dict__.get('_buffers')
                 if buffers is not None and name in buffers:
                     if value is not None and not isinstance(value, torch.Tensor):
-                        raise TypeError(f"cannot assign '{torch.typename(value)}' as buffer '{name}' "
-                                        "(torch.Tensor or None expected)"
+                        raise TypeError(f"cannot assign this as buffer '{name}' "
+                                        "(Tensor or None expected)"
                                         )
-                    for hook in _global_buffer_registration_hooks.values():
-                        output = hook(self, name, value)
-                        if output is not None:
-                            value = output
                     buffers[name] = value
                 else:
                     super().__setattr__(name, value)
 
+    # 在每次删除操作时会被调用
     def __delattr__(self, name):
         if name in self._parameters:
             del self._parameters[name]
@@ -553,6 +561,45 @@ class Module:
             del self._modules[name]
         else:
             super().__delattr__(name)
+
+    def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
+        r"""Return an iterator over module parmeters.
+        
+        经常在使用优化器更新模型参数时使用
+        """
+        for name, param in self.named_parameters(recurse=recurse):
+            yield param
+
+    def named_parameters(
+        self,
+        prefix: str = '',
+        recurse: bool = True,
+        remove_duplicate: bool = True
+    ) -> Iterator[Tuple[str, Parameter]]:
+        r"""Return an iterator over module parameters, yielding both the name of the parameter as well as the parameter itself.
+
+        Args:
+            prefix (str): prefix to prepend to all parameter names.
+            recurse (bool): if True, then yields parameters of this module
+                and all submodules. Otherwise, yields only parameters that
+                are direct members of this module.
+            remove_duplicate (bool, optional): whether to remove the duplicated
+                parameters in the result. Defaults to True.
+
+        Yields:
+            (str, Parameter): Tuple containing the name and parameter
+
+        Example::
+
+            >>> for name, param in self.named_parameters():
+            >>>     if name in ['bias']:
+            >>>         print(param.size())
+
+        """
+        gen = self._named_members(
+            lambda module: module._parameters.items(),
+            prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
+        yield from gen
     
     def __call__(self, *x):
         return self.forward(*x)
