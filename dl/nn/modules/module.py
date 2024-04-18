@@ -675,6 +675,7 @@ class Module:
         if not isinstance(mode, bool):
             raise ValueError("training mode is expected to be boolean")
         self.training = mode
+        set_grad_enabled(self.training)
         # 要将子模型的模式也设置为训练
         # 这个时候就体现出上面一堆实现属性访问方法的作用
         # 就像xxx，平时多大一坨，柱在那啥事不干，但是一到打游戏作用就显示出来了->帮助大家不打瞌睡
