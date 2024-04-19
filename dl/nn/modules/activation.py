@@ -92,7 +92,33 @@ class Tanh(Module):
 
 
 class GELU(Module):
-    pass
+    r"""
+    
+    GELU(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt{2 / \pi} * (x + 0.044715 * x^3)))
+
+    Args:
+        approximate (str, optional): the gelu approximation algorithm to use:
+            ``'none'`` | ``'tanh'``. Default: ``'none'``
+            
+    Examples::
+
+        >>> m = nn.GELU()
+        >>> input = randn(2)
+        >>> output = m(input)
+    """
+
+    __constants__ = ['approximate']
+    approximate: str
+
+    def __init__(self, approximate: str = 'none') -> None:
+        super().__init__()
+        self.approximate = approximate
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.gelu(input, approximate=self.approximate)
+
+    def extra_repr(self) -> str:
+        return f'approximate={repr(self.approximate)}'
 
 
 class LeakyReLU(Module):
@@ -137,7 +163,7 @@ class Softmax(Module):
 
     Softmax is defined as:
     
-    \frac{\exp(x_i)}{\sum_j \exp(x_j)}
+    Softmax(x) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}
 
 
     Returns:
