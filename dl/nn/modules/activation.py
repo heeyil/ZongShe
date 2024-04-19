@@ -134,17 +134,12 @@ class LeakyReLU(Module):
     inplace: bool
     negative_slope: float
 
-    def __init__(self, negative_slope: float = 1e-2, inplace: bool = False) -> None:
+    def __init__(self, negative_slope: float = 1e-2) -> None:
         super().__init__()
         self.negative_slope = negative_slope
-        self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.leaky_relu(input, self.negative_slope, self.inplace)
-
-    def extra_repr(self) -> str:
-        inplace_str = ', inplace=True' if self.inplace else ''
-        return f'negative_slope={self.negative_slope}{inplace_str}'
+        return F.leaky_relu(input, self.negative_slope)
 
 
 class Softmax(Module):
