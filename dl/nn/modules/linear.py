@@ -6,26 +6,55 @@ from ..init import XavierUniform, Zeros
 
 
 class Linear(Module):
+    r""""
+    y = xA^T + b`
+
+    Examples::
+
+        >>> m = nn.Linear(20,30)
+        >>> input = randn(128, 20)
+        >>> output = m(input)
+        >>>print(output.size())
+        size([128, 30])
+    """
+
+    __constants__ = ['in_features', 'out_features']
+    in_features: int
+    out_features: int
+    weight: Tensor
+    
     def __init__(
             self,
-            in_features,
-            out_features,
-            bias=True,
+            in_features: int,
+            out_features: out,
+            bias: bool = True,
+            device=None,
             dtype=None
-    ):
+    ) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
+        self.weight = Parameter(empty((in_features, out_features), **factory_kwargs))
+        if bias:
+            self.bias = Parameter(empty(out_features, **factory_kwargs))
+        else:
+            # 这是Module类中的方法
+            self.register_parameter('bias', None)
+        self.reset_parameters()
 
-        self.weight = Parameter(empty((self.in_features, self.out_features), dtype))
-        self.bias = Parameter(empty(self.out_features, dtype)) if bias else None
-
-        self.init_parameters()
-
-    def init_parameters(self):
-        XavierUniform(self.weight)
+    def reset_parameters(self) -> None:
+        r"""
+        对weight, bias(if not None)进行初始化
+        """
+        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if self.bias is not None:
-            Zeros(self.bias)
+            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+            init.uniform_(self.bias, -bound, bound)
 
-    def forward(self, x):
-        return F.linear(x, self.weight, self.bias)
+    def forward(self, input: Tensor) -> Tensor:
+        return F.linear(input, self.weight, self.bias)
+
+    def extra_repr(self) -> str:
+        return f'in_features={self.in_features}, out_features={self.out_features}, bias={self.bias is not None}'
