@@ -44,19 +44,11 @@ class ReLU(Module):
     
     """
 
-    __constants__ = ['inplace']
-    inplace: bool
-
-    def __init__(self, inplace: bool = False):
+    def __init__(self):
         super().__init__()
-        self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.relu(input, inplace=self.inplace)
-
-    def extra_repr(self) -> str:
-        inplace_str = 'inplace=True' if self.inplace else ''
-        return inplace_str
+        return F.relu(input)
 
 
 class Sigmoid(Module):
