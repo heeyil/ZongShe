@@ -41,4 +41,62 @@ def leaky_relu(input: Tensor, negative_slope: float) -> Tensor:
     return Tensor(tensor.maximum(input, negative_slope * input))
 
 
-def softmax(x: tensor.Tensor, axis=None, keepdims=False)
+def softmax(input: Tensor, dim=None, keepdims=False) -> Tensor:
+    input_sub_max = input - input.data.max()
+    exp_ = tensor.exp(input_sub_max)
+    softmax =  exp_ / tensor.sum(exp_, axis=dim, keepdims=keepdims)
+    return Tensor(softmax, device=input.device)
+
+
+def log_softmax(input: Tensor, dim=None, keepdims=keepdims) -> Tensor:
+    input_sub_max = input - input.data.max()
+    log_softmax = input_sub_max - tensor.log(
+        tensor.sum(tensor.exp(input_sub_max), axis=dim, keepdims=keepdims))
+    return Tensor(log_softmax)
+
+
+def l1_loss(input: Tensor, target: Tensor, reduction: str = 'mean') -> Tensor:
+    loss = tensor.abs(input - target)
+    if reduction == 'mean':
+        return Tensor(tensor.mean(loss), device=input.device)
+    elif reduction == 'sum':
+        return Tensor(tensor.sum(loss), device=input.device)
+    else:
+        assert 0, "reduction must be mean or sum."
+
+
+def nll_loss(
+    input: Tensor, 
+    target: Tensor, 
+    reduction: str = 'mean',
+) -> Tensor:
+    nll = -input * target
+    if reduction == 'mean':
+        return Tensor(tensor.mean(nll), device=input.device)
+    elif reduction == 'sum':
+        return Tensor(tensor.sum(nll), device=input.device)
+    else:
+        assert 0, "reduction must be mean or sum."
+
+
+def mse_loss(input: Tensor, target: Tensor, reduction: str = 'mean') -> Tensor:
+    square_sum = tensor.square(input - target)
+    if reduction == 'mean':
+        return Tensor(tensor.mean(square_sum), device=input.device)
+    elif reduction == 'sum':
+        return Tensor(tensor.sum(square_sum),device=input.device)
+    else:
+        assert 0, "reduction must be mean or sum."
+
+
+def cross_entropy(input: Tensor, target: Tensor, reduction: str = 'mean') -> Tensor:
+    update_input = input - input.data.max()
+    log_sum_exp = tensor.log(
+        tensor.sum(tensor.exp(update_input), 1, keepdims=True))
+    nll = (log_sum_exp - update_input) * target
+    if reduction == 'mean':
+        return Tensor(tensor.mean(nll), device=input.device)
+    elif reduction == 'sum':
+        return Tensor(tensor.sum(nll), device=input.device)
+    else:
+        assert 0, "reduction must be mean or sum."
