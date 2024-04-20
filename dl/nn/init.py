@@ -1,11 +1,81 @@
 from numpy.random import uniform, normal
 import math
 import numpy as np
+import tensor
+from autograd import no_grad
+import warnings
+
+from typing import Optional as _Optional
 
 
-def _calculate_fan_in_and_fan_out(tensor):
+def _no_grad_uniform_(tensor, a, b):
+    with no_grad():
+        tensor.data = uniform(a, b, tensor.shape)
+        return tensor
+
+
+def _no_grad_normal_(tensor, mean, std):
+    with no_grad():
+        tensor.data = normal(mean, std, size=tensor.shape)
+        return tensor
+
+
+def _no_grad_fill_(tensor, val):
+    with no_grad():
+        tensor.data[...] = val
+        return tensor
+
+
+def calculate_gain(nonlinearity, param=None):
+    r"""Return the recommended gain value for the given nonlinearity function.
+
+    The values are as follows:
+
+    ================= ====================================================
+    nonlinearity      gain
+    ================= ====================================================
+    Linear / Identity :math:`1`
+    Conv{1,2,3}D      :math:`1`
+    Sigmoid           :math:`1`
+    Tanh              :math:`\frac{5}{3}`
+    ReLU              :math:`\sqrt{2}`
+    Leaky Relu        :math:`\sqrt{\frac{2}{1 + \text{negative\_slope}^2}}`
+    SELU              :math:`\frac{3}{4}`
+    ================= ====================================================
+
+    Args:
+        nonlinearity: the non-linear function (`nn.functional` name)
+        param: optional parameter for the non-linear function
+
+    Examples:
+        >>> gain = nn.init.calculate_gain('leaky_relu', 0.2)  # leaky_relu with negative_slope=0.2
+    """
+    linear_fns = ['linear', 'conv1d', 'conv2d', 'conv3d', 'conv_transpose1d', 'conv_transpose2d', 'conv_transpose3d']
+    if nonlinearity in linear_fns or nonlinearity == 'sigmoid':
+        return 1
+    elif nonlinearity == 'tanh':
+        return 5.0 / 3
+    elif nonlinearity == 'relu':
+        return math.sqrt(2.0)
+    elif nonlinearity == 'leaky_relu':
+        if param is None:
+            negative_slope = 0.01
+        elif not isinstance(param, bool) and isinstance(param, int) or isinstance(param, float):
+            # True/False are instances of int, hence check above
+            negative_slope = param
+        else:
+            raise ValueError(f"negative_slope {param} not a valid number")
+        return math.sqrt(2.0 / (1 + negative_slope ** 2))
+    elif nonlinearity == 'selu':
+        return 3.0 / 4  # Value found empirically (https://github.com/pytorch/pytorch/pull/50664)
+    else:
+        raise ValueError(f"Unsupported nonlinearity {nonlinearity}")
+
+
+def _calculate_fan_in_and_fan_out(tensor: Tensor):
     dimensions = tensor.ndim
-    assert dimensions >= 2
+    if dimensions < 2:
+        raise ValueError("Fan in and fan out can not be computed for tensor with fewer than 2 dimensions")
 
     num_input_fmaps = tensor.shape[1]
     num_output_fmaps = tensor.shape[0]
@@ -20,39 +90,84 @@ def _calculate_fan_in_and_fan_out(tensor):
     return fan_in, fan_out
 
 
-def Normal(tensor, mean=0., std=1.):
-    tensor.data = normal(mean, std, tensor.shape)
-    return tensor
+def normal_(tensor: Tensor, mean: float = 0., std: float = 1.) -> Tensor:
+    return _no_grad_normal_(tensor, mean, std)
 
 
-def Uniform(tensor, low=0., high=1.0):
-    tensor.data = uniform(low, high, tensor.shape)
+def uniform_(tensor: Tensor, low: float = 0., high: float = 1.0) -> Tensor:
+    return _no_grad_uniform_(tensor, low, high)
 
 
-def Constant(tensor, val):
-    tensor.data = np.full(tensor.shape, fill_value=val)
-    return tensor
+def fill_(tensor: Tensor, val: float) -> Tensor:
+    return _no_grad_fill_(tensor, val)
 
 
-def Zeros(tensor):
-    tensor = Constant(tensor, 0.)
-    return tensor
+def zeros_(tensor: Tensor) -> Tensor:
+    return _no_grad_fill_(tensor, 0.)
 
 
-def Ones(tensor):
-    tensor = Constant(tensor, 1.)
-    return tensor
+def ones_(tensor) -> Tensor:
+    return _no_grad_fill_(tensor, 1.)
 
-
-def XavierUniform(tensor, gain=1.0):
+def xavier_uniform_(tenso: Tensor, gain: float = 1.0) -> Tensor:
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     bound = gain * math.sqrt(6. / (fan_in + fan_out))
-    tensor.data = uniform(-bound, bound, tensor.shape)
-    return tensor
+    return _no_grad_uniform_(tensor, -bound, bound)
 
 
-def XavierNormal(tensor, gain=1.0):
+def xavier_normal_(tensor: Tensor, gain: float = 1.0) -> Tensor:
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / (fan_in + fan_out))
-    tensor.data = normal(0., std, tensor.shape)
-    return tensor
+    return _no_grad_normal_(tensor, std=std)
+
+
+def _calculate_correct_fan(tensor, mode):
+    mode=mode.lower()
+    valid_modes = ['fan_in', 'fan_out']
+    if mode not in valid_modes:
+        raise ValueError(f"Mode {mode} not supported, please use one of {valid_modes}")
+
+    fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
+    return fan_in if mode == 'fan_in' else fan_out 
+
+
+def kaiming_uniform_(
+    tensor: Tensor,
+    a: float = 0,
+    mode: str = "fan_in",
+    nonlinearity: str = "leaky_relu",
+):
+    if 0 in tensor.shape:
+        warnings.warn("Initializing zero-element tensors is a no-op")
+        return tensor
+    fan = _calculate_correct_fan(tensor, mode)
+    gain = calculate_gain(nonlinearity, a)
+    std = gain / math.sqrt(fan)
+    bound = math.sqrt(3.0) * std
+    return _no_grad_uniform_(tensor, -bound, bound)
+
+
+def kaiming_normal_(
+    tensor: Tensor,
+    a: float = 0,
+    mode: str = "fan_in",
+    nonlinearity: str = "leaky_relu",
+):
+    if 0 in tensor.shape:
+        warnings.warn("Initializing zero-element tensors is a no-op")
+        return tensor
+    fan = _calculate_correct_fan(tensor, mode)
+    gain = calculate_gain(nonlinearity, a)
+    std = gain / math.sqrt(fan)
+    return _no_grad_normal_(tensor, 0, std)
+
+"""
+2024年4月20日晚
+在编写这个文件时
+同时观看的比赛 广州TTG vs 济南RW侠
+广州TTG被0：3
+一群废物脑瘫被RW侠零封
+彻底蚌埠住了
+心情被极大影响
+特此注释
+"""
