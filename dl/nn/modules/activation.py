@@ -182,7 +182,7 @@ class Softmax(Module):
             self.dim = None
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.softmax(input, self.dim, _stacklevel=5)
+        return F.softmax(input, self.dim)
 
     def extra_repr(self) -> str:
         return f'dim={self.dim}'
