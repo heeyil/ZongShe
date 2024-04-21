@@ -79,11 +79,7 @@ class Optimizer:
                     if set_to_none:
                         p.grad = None
                     else:
-                        if p.grad.grad_fn is not None:
-                            p.grad.detach_()
-                        else:
-                            p.grad.requires_grad_(False)
-                        p.grad.zero_()
+                        p.zero_grad()
         
         @overload
     def step(self, closure: None = ...) -> None:
@@ -175,7 +171,3 @@ class Optimizer:
             raise ValueError("some parameters appear in more than one parameter group")
 
         self.param_groups.append(param_group)
-
-    def zero_grad(self):
-        for param in self.params:
-            param.zero_grad()
