@@ -1,25 +1,37 @@
 from .optimier import Optimizer
 import numpy as np
+from typing import List, Optional
+from tensor import Tensor
 
 
 class Adadelta(Optimizer):
     def __init__(
-            self,
-            params,
-            lr=float(1.0),
-            rho=float(0.9),
-            weight_decay=float(0),
-            eps=float(1e-6),
+        self,
+        params,
+        lr=1.0,
+        rho=0.9,
+        eps=1e-6
+        weight_decay=0,
     ):
-        super().__init__(params)
-        self.lr = lr
-        self.rho = rho
-        self.eps = eps
-        self.weight_decay = weight_decay
-        self.s = [np.zeros(param.shape) for param in self.params]
-        self.delta = [np.zeros(param.shape) for param in self.params]
+        if not 0.0 <= lr:
+            raise ValueError(f"Invalid learning rate: {lr}")
+        if not 0.0 <= rho <= 1.0:
+            raise ValueError(f"Invalid rho value: {rho}")
+        if not 0.0 <= eps:
+            raise ValueError(f"Invalid epsilon value: {eps}")
+        if not 0.0 <= weight_decay:
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-    def step(self):
+        defaults = dict(
+            lr=lr,
+            rho=rho,
+            eps=eps,
+            weight_decay=weight_decay,
+        )
+
+        super().__init__(params, defaults)
+
+    def step(self, closure=None):
         for i in range(len(self.params)):
             grad = self.params[i].grad + self.weight_decay * self.params[i].data
 
