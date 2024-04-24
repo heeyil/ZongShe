@@ -1,0 +1,11 @@
+import io
+
+from typing import cast, Any, Dict as _Dict, Optional as _Optional, TypeVar, Type, Union
+import copy
+import collections
+from functools import lru_cache
+import warnings
+import threading
+import functools
+
+T = TypeVar('T', bound='Union[_StorageBase, TypedStorage]')
