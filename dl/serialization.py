@@ -86,21 +86,15 @@ def save(
 
 
 def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_record):
-    serialized_storages = {}
+    serialized_storages = {} # 暂存具体数据内容以及对应的key
     id_map: Dict[int, str] = {}
 
-    # Since loading storages that view the same data with different dtypes is
-    # not supported, we need to keep track of the dtype associated with each
-    # storage data_ptr and throw an error if the dtype is ever different.
-    # TODO: This feature could be added in the future
     storage_dtypes: Dict = {}
 
     def persistent_id(obj):
-        if isinstance(obj, torch.storage.TypedStorage) or torch.is_storage(obj):
+        if isinstance(obj, torch.storage.TypedStorage) or torch.is_storage(obj): # 判断是否是需要存储的数据内容
 
             if isinstance(obj, torch.storage.TypedStorage):
-                # TODO: Once we decide to break serialization FC, this case
-                # can be deleted
                 storage = obj._untyped_storage
                 storage_dtype = obj.dtype
                 storage_type_str = obj._pickle_storage_type()
@@ -138,12 +132,25 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
         return None
 
     # Write the pickle data for `obj`
+    # io.BytesIO()用于在内存中创建一个二进制数据流
     data_buf = io.BytesIO()
+    
+    # pickle.Pickler(file, protocol)
+    # args:
+    #     file:指定了要将序列化数据写入的文件对象
+    #     protocol:指定协议版本号,协议版本号决定了序列化数据的格式
+    # pickle.Pickler的作用是将Python对象转换为序列化的字节流    
     pickler = pickle_module.Pickler(data_buf, protocol=pickle_protocol)
-    pickler.persistent_id = persistent_id
-    pickler.dump(obj)
-    data_value = data_buf.getvalue()
-    zip_file.write_record('data.pkl', data_value, len(data_value))
+
+    # pickler.persistent_id
+    # 允许用户自定义持久性 ID 函数(此处为上面的'def persistent_id')
+    # 用于在序列化过程中指定对象的唯一标识符(persistent identifier)
+    # 以便在序列化对象图时标识和处理特定的对象
+    pickler.persistent_id = persistent_id # 将对象的结构信息写入 data_buf 中，具体数据内容暂存在 serialized_storages 中
+    pickler.dump(obj) # 对obj执行写入操作，写入过程会调用persistent_id函数
+    data_value = data_buf.getvalue() # 将写入的对象的结构信息取出来
+    zip_file.write_record('data.pkl', data_value, len(data_value)) # 写入到存储文件zip_file中，这里写入的信息只是对象的结构
+                                                                   # 信息(通过data.pkl来标识)，具体数据内容尚未写入
 
     # Write byte order marker
     if not _disable_byteorder_record:
@@ -153,9 +160,9 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
         zip_file.write_record('byteorder', sys.byteorder, len(sys.byteorder))
 
     # Write each tensor to a file named tensor/the_tensor_key in the zip archive
-    for key in sorted(serialized_storages.keys()):
-        name = f'data/{key}'
-        storage = serialized_storages[key]
+    for key in sorted(serialized_storages.keys()): # 写入数据内容
+        name = f'data/{key}' # 数据的名字
+        storage = serialized_storages[key] # 具体数据内容
         # given that we copy things around anyway, we might use storage.cpu()
         # this means to that to get tensors serialized, you need to implement
         # .cpu() on the underlying Storage
