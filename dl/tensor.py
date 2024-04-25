@@ -1,6 +1,6 @@
 import numpy as np
 from autograd import is_grad_enable, no_grad
-from typing import Any, List, Tuple, Union
+from typing import Any, List, Tuple, Union, Optional
 from cuda import Device
 
 
@@ -56,6 +56,9 @@ class Graph:
         Graph.node_list = new_list
 
 
+_tensor_count = 0
+
+
 class Tensor:
     """
     将数据(NumPy数组)包装成可微分张量
@@ -68,6 +71,7 @@ class Tensor:
         是否需要求梯度;
     dtype : default=None
         数据类型，和numpy数组的dtype等价
+    name : Tensor的名称
 
     Attributes
     ----------
@@ -77,6 +81,8 @@ class Tensor:
         是否需要求梯度;
     grad : numpy.ndarray
         梯度数据，为和data相同形状的数组(初始化为全0);
+    unique_id : int
+        没有为Tensor取名时，用此作为其名;
     children : list[Tensor]
         下游节点列表；
     parents : list[Tensor]
@@ -88,8 +94,18 @@ class Tensor:
             data: Any,
             dtype=None,
             device: Union[Device, int, str, None] = None,
+            name: Optional[str] = None,
             requires_grad: bool = False
     ) -> None:
+
+        global _tensor_count
+        _tensor_count += 1
+        self.unique_id = _tensor_count
+        if name is not None:
+            self.name = name
+        else:
+            self.name = str(self.unique_id)
+        
         if isinstance(data, Tensor):
             data = data.data
 
