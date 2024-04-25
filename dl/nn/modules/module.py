@@ -1,3 +1,4 @@
+import itertools
 from collections import OrderedDict
 from nn.parameter import Parameter
 from cuda import Device, current_device
@@ -67,6 +68,36 @@ class Module:
         super().__setattr__('_non_persistent_buffers_set', set())
         super().__setattr__('_modules', OrderedDict())
 
+
+    """
+    Attention Please!!!
+    在这里声明了'forward'方法
+    Callable[..., Any] 表明它是一个可调用对象，接受任意数量和类型的参数，并返回任意类型的值
+    Callable[..., Any] 的作用等价于
+
+    def __call__(self, *input):
+        return self.forward(*input)
+
+    而forward方法默认值为 方法_forward_unimplemented
+    因为forward本就是需要继承Module类的子类去实现的
+    如果子类没有实现forward就调用
+    那么就会调用默认的_forward_unimplemented方法
+    从而引发报错
+
+    总的来说，下面这段代码等价于
+
+    class Module:
+        def __call__(self, *input):
+            return self.forward(*input)
+
+        def forward(self, *input):
+            raise NotImplementedError
+
+    下面这种写法明显感觉更高级，其他优点不知道
+    """
+    forward: Callable[..., Any] = _forward_unimplemented
+
+    
     def register_buffer(self, name: str, tensor: Optional[Tensor], persistent: bool = True) -> None:
         r"""Add a buffer to the module.
 
@@ -118,33 +149,6 @@ class Module:
             else:
                 self._non_persistent_buffers_set.add(name)
 
-    """
-    Attention Please!!!
-    在这里声明了'forward'方法
-    Callable[..., Any] 表明它是一个可调用对象，接受任意数量和类型的参数，并返回任意类型的值
-    Callable[..., Any] 的作用等价于
-
-    def __call__(self, *input):
-        return self.forward(*input)
-
-    而forward方法默认值为 方法_forward_unimplemented
-    因为forward本就是需要继承Module类的子类去实现的
-    如果子类没有实现forward就调用
-    那么就会调用默认的_forward_unimplemented方法
-    从而引发报错
-
-    总的来说，下面这段代码等价于
-
-    class Module:
-        def __call__(self, *input):
-            return self.forward(*input)
-
-        def forward(self, *input):
-            raise NotImplementedError
-
-    下面这种写法明显感觉更高级，其他优点不知道
-    """
-    forward: Callable[..., Any] = _forward_unimplemented
 
     def register_parameter(self, name: str, param: Optional[Parameter]) -> None:
         r"""Add a parameter to the module.
@@ -352,11 +356,6 @@ class Module:
     """
     ！！！attention please ！！！
     下面是Module类中一个究极重要的方法
-    其重要程度就像原神、星铁、火影、睡觉、大吼大叫对牛折翼的重要程度
-    没有这些的话牛折翼就不是一个完整的牛折翼，其就不能正常运作
-    对Module类也是如此
-    通过上面这个例子你应该能明白下面这个'setattr'类有多重要了
-
     '__setattr__'的作用就是正确地将parameter,buffer,module添加到Module中
     """
     
@@ -366,9 +365,6 @@ class Module:
     https://zhuanlan.zhihu.com/p/101004827?from_voters_page=true
     关于'__dict__'参考：
     https://c.biancheng.net/view/2374.html
-    关于'niuzheyi'参考：
-    https://www.zhihu.com/question/355555256
-    https://www.zhihu.com/question/527375088
     """
     
     def __setattr__(self, name: str, value: Union[Tensor, 'Module']) -> None:
@@ -435,7 +431,7 @@ class Module:
                 
                 buffers = self.__dict__.get('_buffers')
                 if buffers is not None and name in buffers:
-                    if value is not None and not isinstance(value, torch.Tensor):
+                    if value is not None and not isinstance(value, Tensor):
                         raise TypeError(f"cannot assign this as buffer '{name}' "
                                         "(Tensor or None expected)"
                                         )
@@ -455,6 +451,21 @@ class Module:
         else:
             super().__delattr__(name)
 
+
+    def params_and_buffers_saved(self):
+        """
+        限于技术，目前无法实现像pytorch那样的保存与加载功能
+        所以在此处整个简单的方法来实现保存与加载
+
+        这个方法的功能主要是将Moudel中的parameter和persistent为true的buffers合到一起
+        """
+        persistent_buffers = {k: v for k, v in self._buffers.items() if k not in self._non_persistent_buffers_set}
+        # 关于itertools.chain()，可参考chatgpt
+        local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())
+        local_state = {k: v for k, v in local_name_params if v is not None}
+        return local_state
+
+    
     def _named_members(self, get_members_fn, prefix='', recurse=True, remove_duplicate: bool = True):
         r"""Help yield various names + members of modules."""
         memo = set()
