@@ -1,7 +1,6 @@
-# 下面这种方法模型保存的方法就是老师上课讲的方法
-# 我一开始并不想用这种方法，因为实现过于简单，且无法保存整个模型(nn.Module)
-# 但我想实现的方法太过复杂，有心无力
-# 故等到后面用c++重构底层代码时再修改此篇(估计到综设结束都不会去做，因为不会c++)
+# 下面这种方法模型保存的方法是究极简单版
+# pytorch的方法太复杂了
+# 故等到后面用c++重构底层代码时再修改此篇
 
 import json
 import os
@@ -15,61 +14,46 @@ from tensor import Graph
 FILE_LIKE: TypeAlias = Union[str, os.PathLike, BinaryIO, IO[bytes]]
 
 
-class Saver:
-    r"""
-    模型、计算图保存和加载工具类
-    模型保存微两个单独文件：
-    1.计算图自身的结构元信息
-    2.节点的值，变量节点的权值
-    """
-
-    def __init__(self, f: FILE_LIKE):
-        self.f = f
-        if not os.path.exists(self.f):
-            os.makedirs(self.f)
-
-
-    def save(self, graph=None, meta=None, service_signature=None,  model_file_name='model.json',  weights_file_name='weights.npz'):
-        """
-        把计算图保存到文件中
-        """
-
-        # 元信息，记录模型的保存时间和节点值文件名
-        meta = {} if meta is None else meta
-        meta['save_time'] = str(datatime.datatime.now())
-        meta['weights_file_name'] = weights_file_name
-
-        # 服务接口描述
-        service = {} if service_signature is None else service_signature
-
-        #保存
-        self._save_model_and_weights(
-            graph, meta, service, model_file_name, weights_file_name)
-
-
-    def _save_model_and_weights(self, graph, meta, service, model_file_name, weights_file_name):
-        model_json = {
-            'meta': meta,
-            'service':service
-        }
-        graph_json = []
-        weights_dict = ditc()
-
-        # 把节点元信息保存为dict/json格式
-        for node in Graph.node_list:
-            node_json = {
-                'node_type': node.__class__.__name__,
-                'name': node.name,
-                'parents': [parent.name for parent in node.parents],
-                'children': [child.name for child in node.children],
-            }
-
-            # 保存节点的dim信息
-            if node.data is not None:
-                node_json['dim] = node.shape
-
-            
-            
-                 
-        
+def save(obj: object, f: FILE_LIKE,  meta=None,model_file_name='model.json',weights_file_name='weights.npz') -> None:
+             
+    if not os.path.exists(f):
+        os.makedirs(f)
     
+    # 元信息，主要记录模型的保存时间和节点值文件名
+    meta = {} if meta is None else meta
+    meta['save_time'] = str(datetime.datetime.now())
+    meta['weights_file_name'] = weights_file_name
+
+    model_json = {'meta': meta}
+    graph_json = []
+    weights_dict = dict()
+
+    # 开始记录parameters和buffers并保存
+    params_buffers = obj.params_and_buffers_saved()
+    for k, v in params_buffers：
+        node_json = {
+            'node_type': k,
+            'name': v.name,
+        }
+
+        if v.data is not None:
+            node_json['dim'] = v.shape
+
+        graph_json.append(node_json)
+
+        # 保存值
+        weights_dict[v.name] = v.data
+
+    model_json['graph'] = graph_json
+
+    # json格式保存计算图元信息
+    model_file_path = os.path.join(f, model_file_name)
+    with open(model_file_path, 'w') as model_file:
+        json.dump(model_json, model_file, indent=4)
+        print('Save model into file: {}'.format(model_file.name))
+
+    # npz格式保存节点值
+    weights_file_path = os.path.join(f, weights_file_name)
+    with open(weights_file_path, 'wb') as weights_file:
+        np.savez(weights_file, **weights_dict)
+        print('Save weights to file: {}'.format(weights_file.name))
