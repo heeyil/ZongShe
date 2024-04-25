@@ -1,173 +1,75 @@
-import pickle
-import sys
+# 下面这种方法模型保存的方法就是老师上课讲的方法
+# 我一开始并不想用这种方法，因为实现过于简单，且无法保存整个模型(nn.Module)
+# 但我想实现的方法太过复杂，有心无力
+# 故等到后面用c++重构底层代码时再修改此篇(估计到综设结束都不会去做，因为不会c++)
+
+import json
 import os
-import struct
-import warnings
 import io
-import zipfile
+import datetime
 from typing import Any, BinaryIO, Callable, cast, Dict, Optional, Type, Tuple, Union, IO, List
-from typing_extensions import TypeAlias, TypeGuard  # Python 3.10+
+from typing_extensions import TypeAlias, TypeGuard
+from tensor import Graph
 
-
+# 目前一般用到的都是'str',所以之后的实现默认FILE_LIKE为str类型的，即要保存的文件路径
 FILE_LIKE: TypeAlias = Union[str, os.PathLike, BinaryIO, IO[bytes]]
-MAP_LOCATION: TypeAlias = Optional[Union[Callable[[torch.Tensor, str], torch.Tensor], torch.device, str, Dict[str, str]]]
-STORAGE: TypeAlias = Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]
 
 
-def _is_path(name_or_buffer) -> TypeGuard[Union[str, os.PathLike]]:
-    return isinstance(name_or_buffer, (str, os.PathLike))
+class Saver:
+    r"""
+    模型、计算图保存和加载工具类
+    模型保存微两个单独文件：
+    1.计算图自身的结构元信息
+    2.节点的值，变量节点的权值
+    """
+
+    def __init__(self, f: FILE_LIKE):
+        self.f = f
+        if not os.path.exists(self.f):
+            os.makedirs(self.f)
 
 
-class _opener:
-  def __init__(self, file_like):
-    self.file_like = file_like
+    def save(self, graph=None, meta=None, service_signature=None,  model_file_name='model.json',  weights_file_name='weights.npz'):
+        """
+        把计算图保存到文件中
+        """
 
-  def __enter__(self):
-    return self.file_like
+        # 元信息，记录模型的保存时间和节点值文件名
+        meta = {} if meta is None else meta
+        meta['save_time'] = str(datatime.datatime.now())
+        meta['weights_file_name'] = weights_file_name
 
-  def __exit__(self, *args):
-    pass
+        # 服务接口描述
+        service = {} if service_signature is None else service_signature
 
-
-class _open_zipfile_writer_file(_opener):
-  r"""创建一个用于写入 zip 文件的文件写入器"""
-    def __init__(self, name) -> None:
-        self.file_stream = None
-        self.name = str(name)
-        try:
-            # 将name编码为 ASCII
-            self.name.encode('ascii')
-        except UnicodeEncodeError:
-            # 编码不是 ASCII，文件名中包含非 ASCII 字符
-            self.file_stream = io.FileIO(self.name, mode='w')
-            super().__init__(self.file_stream)
-        else:
-            super().__init__(zipfile.ZipFile(self.name, 'w'))
-
-    def __exit__(self, *args) -> None:
-        if self.file_stream is not None:
-            self.file_stream.close()
+        #保存
+        self._save_model_and_weights(
+            graph, meta, service, model_file_name, weights_file_name)
 
 
-class _open_zipfile_writer_buffer(_opener):
-  # 这个玩意感觉平时用球不到，不写了
+    def _save_model_and_weights(self, graph, meta, service, model_file_name, weights_file_name):
+        model_json = {
+            'meta': meta,
+            'service':service
+        }
+        graph_json = []
+        weights_dict = ditc()
 
+        # 把节点元信息保存为dict/json格式
+        for node in Graph.node_list:
+            node_json = {
+                'node_type': node.__class__.__name__,
+                'name': node.name,
+                'parents': [parent.name for parent in node.parents],
+                'children': [child.name for child in node.children],
+            }
 
-def _open_zipfile_writer(name_or_buffer):
-    container: Type[_opener]
-    if _is_path(name_or_buffer):
-        # 一般都是用这个
-        container = _open_zipfile_writer_file
-    else:
-        container = _open_zipfile_writer_buffer
-    return container(name_or_buffer)
+            # 保存节点的dim信息
+            if node.data is not None:
+                node_json['dim] = node.shape
 
-
-def save(
-  obj: object,
-  f: FILE_LIKE
-  pickle_module: Any = pickle,
-  pickle_protocol: int = DEFAULT_PROTOCOL,
-  _use_new_zipfile_serialization: bool = True,
-  _disable_byteorder_record: bool = False
-) -> None:
-  
-  # 下面这两个有点麻烦，先放在这不实现
-  # _check_dill_version(pickle_module)
-  # _check_save_filelike(f)
-  
-  if _use_new_zipfile_serialization:
-      with _open_zipfile_writer(f) as opened_zipfile:
-          _save(obj, opened_zipfile, pickle_module, pickle_protocol, _disable_byteorder_record)
-          return
-  else:
-      with _open_file_like(f, 'wb') as opened_file:
-          _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
-
-
-def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_record):
-    serialized_storages = {} # 暂存具体数据内容以及对应的key
-    id_map: Dict[int, str] = {}
-
-    storage_dtypes: Dict = {}
-
-    def persistent_id(obj):
-        if isinstance(obj, torch.storage.TypedStorage) or torch.is_storage(obj): # 判断是否是需要存储的数据内容
-
-            if isinstance(obj, torch.storage.TypedStorage):
-                storage = obj._untyped_storage
-                storage_dtype = obj.dtype
-                storage_type_str = obj._pickle_storage_type()
-                storage_type = getattr(torch, storage_type_str)
-                storage_numel = obj._size()
-
-            else:
-                storage = obj
-                storage_dtype = torch.uint8
-                storage_type = normalize_storage_type(type(obj))
-                storage_numel = storage.nbytes()
-
-            # If storage is allocated, ensure that any other saved storages
-            # pointing to the same data all have the same dtype. If storage is
-            # not allocated, don't perform this check
-            if storage.data_ptr() != 0:
-                if storage.data_ptr() in storage_dtypes:
-                    if storage_dtype != storage_dtypes[storage.data_ptr()]:
-                        raise RuntimeError(
-                            'Cannot save multiple tensors or storages that '
-                            'view the same data as different types')
-                else:
-                    storage_dtypes[storage.data_ptr()] = storage_dtype
-
-            storage_key = id_map.setdefault(storage._cdata, str(len(id_map)))
-            location = location_tag(storage)
-            serialized_storages[storage_key] = storage
-
-            return ('storage',
-                    storage_type,
-                    storage_key,
-                    location,
-                    storage_numel)
-
-        return None
-
-    # Write the pickle data for `obj`
-    # io.BytesIO()用于在内存中创建一个二进制数据流
-    data_buf = io.BytesIO()
+            
+            
+                 
+        
     
-    # pickle.Pickler(file, protocol)
-    # args:
-    #     file:指定了要将序列化数据写入的文件对象
-    #     protocol:指定协议版本号,协议版本号决定了序列化数据的格式
-    # pickle.Pickler的作用是将Python对象转换为序列化的字节流    
-    pickler = pickle_module.Pickler(data_buf, protocol=pickle_protocol)
-
-    # pickler.persistent_id
-    # 允许用户自定义持久性 ID 函数(此处为上面的'def persistent_id')
-    # 用于在序列化过程中指定对象的唯一标识符(persistent identifier)
-    # 以便在序列化对象图时标识和处理特定的对象
-    pickler.persistent_id = persistent_id # 将对象的结构信息写入 data_buf 中，具体数据内容暂存在 serialized_storages 中
-    pickler.dump(obj) # 对obj执行写入操作，写入过程会调用persistent_id函数
-    data_value = data_buf.getvalue() # 将写入的对象的结构信息取出来
-    zip_file.write_record('data.pkl', data_value, len(data_value)) # 写入到存储文件zip_file中，这里写入的信息只是对象的结构
-                                                                   # 信息(通过data.pkl来标识)，具体数据内容尚未写入
-
-    # Write byte order marker
-    if not _disable_byteorder_record:
-        if sys.byteorder not in ['little', 'big']:
-            raise ValueError('Unknown endianness type: ' + sys.byteorder)
-
-        zip_file.write_record('byteorder', sys.byteorder, len(sys.byteorder))
-
-    # Write each tensor to a file named tensor/the_tensor_key in the zip archive
-    for key in sorted(serialized_storages.keys()): # 写入数据内容
-        name = f'data/{key}' # 数据的名字
-        storage = serialized_storages[key] # 具体数据内容
-        # given that we copy things around anyway, we might use storage.cpu()
-        # this means to that to get tensors serialized, you need to implement
-        # .cpu() on the underlying Storage
-        if storage.device.type != 'cpu':
-            storage = storage.cpu()
-        # Now that it is on the CPU we can directly copy it into the zip file
-        num_bytes = storage.nbytes()
-        zip_file.write_record(name, storage, num_bytes)
