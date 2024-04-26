@@ -1,4 +1,4 @@
-import numpy as np
+import numpy
 from .optimier import Optimizer
 
 class NadamOptimizer:
