@@ -681,6 +681,15 @@ class log(UnaryOperator):
     def grad_fn(self, x: Tensor, grad: np.ndarray) -> np.ndarray:
         return grad / x.data
 
+class sqrt(UnaryOperator):
+    """平方根函数"""
+
+    def forward(self, x: Tensor) -> np.ndarray:
+        return self.xp.sqrt(x.data)
+
+    def grad_fn(self, x: Tensor, grad: np.ndarray) -> np.ndarray:
+        return 0.5 * grad / self.xp.sqrt(x.data)
+
 
 class maximum(BinaryOperator):
     def forward(self, x: Tensor, y: Tensor) -> np.ndarray:
