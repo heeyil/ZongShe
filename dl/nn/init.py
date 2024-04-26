@@ -160,14 +160,3 @@ def kaiming_normal_(
     gain = calculate_gain(nonlinearity, a)
     std = gain / math.sqrt(fan)
     return _no_grad_normal_(tensor, 0, std)
-
-"""
-2024年4月20日晚
-在编写这个文件时
-同时观看的比赛 广州TTG vs 济南RW侠
-广州TTG被0：3
-一群废物脑瘫被RW侠零封
-彻底蚌埠住了
-心情被极大影响
-特此注释
-"""
