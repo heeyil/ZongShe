@@ -272,9 +272,9 @@ class Tensor:
 
         assert self.data.ndim == 0
 
-        self.grad = self.xp.ones_like(self.data)
+        self.grad = self.xp.ones_like(self.data)  # 初始化梯度和数据相同size的全1张量
         for i in range(len(Graph.node_list) - 1, -1, -1):  # 逆序遍历计算图的结点列表
-            if Graph.node_list[i] is self:
+            if Graph.node_list[i] is self: # 检查当前结点是否和对象相同
                 id = i
                 break
 
@@ -296,10 +296,10 @@ class Tensor:
                 parent.grad += add_grad
 
             if not node.is_leaf:
-                node.grad = None
+                node.grad = None #  不是叶子结点没有梯度
 
-        if not retain_graph:
-            Graph.free_graph()
+        if not retain_graph:  #  不是retain_graph则释放结点
+            Graph.free_graph()  
 
     def zero_grad(self):
         """梯度归零"""
