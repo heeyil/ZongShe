@@ -97,7 +97,12 @@ class Tensor:
             name: Optional[str] = None,
             requires_grad: bool = False
     ) -> None:
-
+        
+        """
+        _tensor_count用于跟踪张量个数
+        每一个张量分配一个标识符
+        """
+        
         global _tensor_count
         _tensor_count += 1
         self.unique_id = _tensor_count
@@ -255,56 +260,8 @@ class Tensor:
     下面这些肯定是不够的，还需要日后补充。
     """
 
-    def __add__(self, x):
-        return add(self, x)
-
-    def __radd__(self, x):
-        return add(x, self)
-
-    def __sub__(self, x):
-        return sub(self, x)
-
-    def __rsub__(self, x):
-        return sub(x, self)
-
-    def __mul__(self, x):
-        return mul(self, x)
-
-    def __rmul__(self, x):
-        return mul(x, self)
-
-    def __matmul__(self, x):
-        return matmul(self, x)
-
-    def __rmatmul__(self, x):
-        return matmul(x, self)
-
-    def __truediv__(self, x):
-        return div(self, x)
-
-    def __rtruediv__(self, x):
-        return div(x, self)
-
-    def __pow__(self, x):
-        return pow(self, x)
-
-    def __rpow__(self, x):
-        return pow(x, self)
-
-    def __len__(self) -> int:
-        return len(self.data)
-
-    def __pos__(self):
-        return 1 * self
-
-    def __neg__(self):
-        return -1 * self
-
-    def __abs__(self):
-        return abs(self)
-
-    def __getitem__(self, key):
-        return get_slice(self, key)
+   
+    
 
     def backward(self, retain_graph: bool = False):
         """
